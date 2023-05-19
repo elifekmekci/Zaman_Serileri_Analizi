@@ -1,0 +1,248 @@
+---
+title: "Zaman Serileri Analizi"
+author: "ELİF EKMEKCİ"
+date: "2023-05-11"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readxl)
+altindata <- read_excel("/Users/elif/Desktop/altindata.xlsx")
+```
+
+```{r}
+head(altindata)
+```
+
+Verimizin ilk 6 gözlemini incelediğimizde aylık bir veri olduğunu ve 2013-01-01 tarihinden başladığını görüyoruz.
+
+Verimizden **xau_usd_ounce** değişkenini modelleyelim. Bunun için ts() fonksiyonu ile değişkenimizi seçelim:
+
+```{r message=FALSE, warning=FALSE}
+library(fpp2)
+usd <- ts(altindata$xau_usd_ounce, start = c(2013,1), frequency = 12) 
+# her ayin 1.gununden itibaren aldigi icin c(2013,1) seklinde yazdik
+```
+
+**xau_usd_ounce** değişkenimizin grafiğini çizdirip trend ve mevsimselliğini inceleyelim:
+
+```{r}
+autoplot(usd)
+```
+
+- Grafik incelendiğinde belirgin net bir trend olmadığını görüyoruz. 
+
+Şimdi **xau_usd_ounce** değişkeninin verilerini üstel düzleştirme modelleri ile modelleyip modeller arasından en uygununu belirleyelim:
+
+Verimizi test ve train olarak ayıralım:
+
+```{r}
+test <- window(usd, start = c(2020,10))
+train <- window(usd, end = c(2020,9))
+h <- length(test)
+```
+
+
+## BASİT ÜSTEL DÜZLEŞTİRME
+
+İlk olarak **basit üstel düzleştirme** modelini kullanalım.
+
+-Basit üstel düzleştirme modelinde gözlemlere önceki gözlemlere doğru alfa ağırlıkları veriliyor. 
+
+```{r}
+se <- ses(train, h = h)
+summary(se)
+```
+
+Çıktı incelendiğinde  alpha = 0.9999  olarak hesaplanmıştır.Bu değer 1'e oldukça yakındır bu nedenle modelin ağırlıkları son gözleme verdiğini önceki (ilk) gözlemlere fazla önem (ağırlık) vermediğini anlıyoruz.
+
+Basit üstel düzleştirme modelinden hesapladığımız train set ve test seti üzerindeki tahminlerin, veri seti üzerindeki grafiklerini çizdirelim:
+```{r}
+autoplot(usd) +
+  autolayer(fitted(se), series = "Fitted ses") +
+  autolayer(se, series = "forecasts ses", PI = FALSE)
+```
+
+Test ve training seti RMSE değerlerini hesaplayalım:
+```{r}
+a<-accuracy(se,test)
+a
+```
+
+Training set Cross validated RMSE hesaplayalım:
+```{r}
+e1 <- tsCV(train,ses)
+RMSE1 <- sqrt(mean(e1^2, na.rm = TRUE))
+RMSE1
+```
+
+## HOLT'UN LİNEER TREND YÖNTEMİ
+
+Şimdi Holt'un Lineer Trend Yöntemini uygulayalım
+
+- Bu modelde basit üstel düzleştirme modeline ek olarak trend equation geliyor bu da 2 tane ekstra parametre (b0 ve beta*) ekliyor.
+- Modelin normal ve sönümlemeli olarak iki çeşidi var.
+
+Modeli kuralım:
+```{r}
+modholt <- holt(train, h = h)
+```
+
+Hesapladığımız train set ve test seti üzerindeki tahminlerin, veri seti üzerindeki grafiklerini çizdirelim:
+```{r}
+autoplot(usd) +
+  autolayer(fitted(modholt), series = "Fitted holt") +
+  autolayer(modholt, series = "forecasts holt", PI = FALSE)
+```
+
+Test ve training seti RMSE ve Cross validated RMSE değerlerini hesaplayalım:
+```{r}
+b <- accuracy(modholt,test)
+b
+e2 <- tsCV(train,holt)
+RMSE2 <- sqrt(mean(e2^2, na.rm = TRUE))
+RMSE2
+```
+
+## HOLT'UN SÖNÜMLEMELİ MODELİ
+
+Şimdi Holt'un Sönümlemeli modelinin kullanalım
+
+```{r}
+modholtsonumlemeli <- holt(train,damped =TRUE, h =h)
+# belirtmedigimiz icin phi degerini kendisi belirleyecek
+modholtsonumlemeli$model
+```
+
+Holt'un Sönümlemeli Modeli'nden hesapladığımız train set ve test seti üzerindeki tahminlerin, veri seti üzerindeki grafiklerini çizdirelim:
+
+```{r}
+autoplot(usd) +
+  autolayer(fitted(modholtsonumlemeli), series = "Fitted holt sonumlemeli") +
+  autolayer(modholtsonumlemeli, series = "forecasts holt sonumlemeli", PI = FALSE)
+```
+
+Test ve training seti RMSE ve Cross validated RMSE değerlerini hesaplayalım
+```{r}
+c <- accuracy(modholtsonumlemeli,test)
+fdamped <- function(y,h){holt(y,damped = TRUE,h=h)}
+# holt diye yazdigimiz fonksiyonun default'unda sonumleme yok
+# bu nedenle biz sonumleme iceren fdamped adinda bir fonksiyon yazdik
+e3 <- tsCV(train,fdamped)
+# train yanina fonksiyon yaziyoruz karistirma
+RMSE3 <- sqrt(mean(e3^2, na.rm = TRUE))
+RMSE3
+```
+## HOLT WINTERS YÖNTEMİ
+
+Holt Winters modelini kurup özet istatistiklerine bakalım
+```{r}
+holdwin <-hw(train,h=h)
+summary(holdwin)
+```
+
+Kasım 2020 için nokta tahminin 1879.191	olarak hesaplandığını görüyoruz.
+
+Holt Winters Yöntemi kullanarak elde ettiğimiz train ve test seti tahminlerinin grafiğini çizdirelim
+```{r}
+autoplot(usd)+
+  autolayer(fitted(holdwin),series = "fitted holt winters")+
+  autolayer(holdwin,series ="forecasts holt winters",PI=FALSE )
+```
+
+Test ve training seti RMSE ve Cross validated RMSE değerlerini hesaplayalım
+```{r}
+##test ve training set RMSE değerleri
+d <-accuracy(holdwin,test)
+## training set cross validated RMSE değerleri
+e4 <-tsCV(train,hw)
+# hw fonksiyonun adi
+RMSE4 <-sqrt(mean(e4^2,na.rm=TRUE))
+RMSE4
+```
+
+## HOLT WINTERS YÖNTEMİ (ÇARPIMSAL MEVSİMSEL MODEL)
+Holt Winters'ın çarpımsal mevsimsellik içeren modelini kurup özet istatistiklerine bakalım
+```{r}
+holdwinmultip <-hw(train,h=h,seasonal = "multiplicative")
+summary(holdwinmultip)
+```
+Kasım 2020 için nokta tahminin 1895.781	olarak hesaplandığını görüyoruz.
+
+Holt Winters'ın çarpımsal mevsimsellik içeren yöntemini kullanarak elde ettiğimiz train ve test seti tahminlerinin grafiğini çizdirelim
+```{r}
+autoplot(usd)+
+  autolayer(fitted(holdwinmultip),series = "fitted holt winters multiplicative")+
+  autolayer(holdwinmultip,series ="forecasts holt winters multiplicative",PI=FALSE )
+```
+
+Test ve training seti RMSE ve Cross validated RMSE değerlerini hesaplayalım
+```{r}
+##test ve training set RMSE değerleri
+e<-accuracy(holdwinmultip,test)
+## training set cross validated RMSE değerleri
+fhw<-function(y,h){hw(y,seasonal = "multiplicative",h=h)}
+e5<-tsCV(train,fhw,h=1)
+RMSE5<-sqrt(mean(e5^2,na.rm=TRUE))
+RMSE5
+```
+
+## ETS YÖNTEMİ
+
+ETS modelini kuralım
+```{r}
+etsmod <- ets(train)
+etsmod
+```
+Çıktıyı incelediğimizde ETS(M,N,N) modelinin seçildiğini görüyoruz. Bu modelde multiplicative error, trend ve mevsimsellik yok.
+
+
+ETS yöntemini kullanarak elde ettiğimiz train ve test seti tahminlerinin grafiğini çizdirelim
+```{r}
+autoplot(usd)+
+  autolayer(fitted(etsmod),series="fitted ets") +
+  autolayer(forecast(etsmod,h=h),series ="forecasts ets",PI=FALSE)
+```
+
+
+Test ve training seti RMSE ve Cross validated RMSE değerlerini hesaplayalım
+```{r}
+##test ve training set RMSE değerleri
+f <-accuracy(forecast(etsmod,h=h),test)
+## training set cross validated RMSE değerleri
+fets <-function(y,h){forecast(ets(y,model="MNN"),h=h)}
+# etsmod ciktisindan MNN model sectigine bakmistik bu yuzden modele MNN yazdik
+e6<-tsCV(train,fets,h=1)
+RMSE6<-sqrt(mean(e6^2,na.rm=TRUE))
+RMSE6
+```
+
+Şimdi kurduğumuz tüm modellerin forecastlerini aynı grafik üzerinde gösterelim.
+
+```{r}
+autoplot(usd)+autolayer(se,series ="forecasts ses",PI=FALSE )+
+  autolayer(modholt,series ="forecasts holt",PI=FALSE )+
+  autolayer(modholtsonumlemeli,series ="forecasts holt sönümlemeli",PI=FALSE )+
+  autolayer(holdwin,series ="forecasts holt winters",PI=FALSE )+
+  autolayer(holdwinmultip,series ="forecasts holt winters multiplicative",PI=FALSE )+
+  autolayer(forecast(etsmod,h=h),series ="forecasts ets",PI=FALSE )
+```
+```{r}
+TABLO <- matrix(c(RMSE1,a[2,2],RMSE2,b[2,2],RMSE3,c[2,2],
+                  RMSE4,d[2,2],RMSE5,e[2,2],RMSE6,f[2,2]), 
+                nrow = 6, ncol = 2,byrow = T)
+
+rownames(TABLO)<- c("ses","holt","holt_damped",
+                  "holtwinters_additive",
+                  "holtwinters_multiplicative","ets")
+
+colnames(TABLO)<- c("CVrmse","testRMSE")
+TABLO
+```
+Sonuçlar karşılaştırıldığında en iyi modelin basit üstel düzleştirme modeli(ses) olduğu görülmektedir.
+
+
